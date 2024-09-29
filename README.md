@@ -1,2 +1,2 @@
-# 4-PPPC-Course-Life-Achivements
+# 4-PPPC-Course-Work-Life-Achivements
 "ППФК" НТУ "ХПІ" / Розробка програмного забезпечення / Курсова робота / 4-й курс / Життєві досягнення
