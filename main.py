@@ -47,7 +47,7 @@ async def send_achievement_details(message, achievement, achievement_id):
     
     await message.reply_photo(
         photo=achievement['photo_url'],
-        caption=f"{achievement['title']}\n{achievement['description']}",
+        caption=f"{achievement['title']}\n\n{achievement['description']}",
         reply_markup=reply_markup
     )
 
@@ -60,7 +60,7 @@ async def send_random_achievement_details(message, achievement):
     
     await message.reply_photo(
         photo=achievement['photo_url'],
-        caption=f"{achievement['title']}\n{achievement['description']}",
+        caption=f"{achievement['title']}\n\n{achievement['description']}",
         reply_markup=reply_markup
     )
 
@@ -130,7 +130,7 @@ last_achievement_id = None
 async def send_random_achievement(query, edit=False):
     global last_achievement_id
     achievements_ref = db.collection('achievements').stream()
-    achievements = [ach.to_dict() for ach in achievements_ref]
+    achievements = [(ach.id, ach.to_dict()) for ach in achievements_ref]
 
     # Перевірка наявності досягнень
     if not achievements:
@@ -138,21 +138,23 @@ async def send_random_achievement(query, edit=False):
         return
 
     # Пошук випадкового досягнення
-    achievement = random.choice(achievements)
+    achievement_id, achievement = random.choice(achievements)
     
-    # Використовуємо ідентифікатор документа як унікальний ID
+    # Перевірка, щоб не повторювалося останнє досягнення
     while achievement['photo_url'] == last_achievement_id and len(achievements) > 1:
-        achievement = random.choice(achievements)
+        achievement_id, achievement = random.choice(achievements)
 
-    last_achievement_id = achievement['photo_url']  # Зберігаємо photo_url останнього досягнення
+    last_achievement_id = achievement['photo_url']  # Зберігаємо останній photo_url
 
-    # Клавіатура для випадкового досягнення
+    # Оновлена клавіатура з `achievement_id`
     keyboard = [
+        [InlineKeyboardButton("📝 Виконати", callback_data=f'complete_{achievement_id}')],
         [InlineKeyboardButton("🔄 Нове випадкове", callback_data='new_random')],
         [InlineKeyboardButton("⬅️ Назад", callback_data='main_menu')],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
+    # Відправка або редагування повідомлення з випадковим досягненням
     if edit:
         await query.message.edit_media(
             media=InputMediaPhoto(
@@ -169,6 +171,12 @@ async def send_random_achievement(query, edit=False):
         )
 
 async def list_achievements(query):
+    user_id = query.from_user.id
+    user_ref = db.collection('users').document(str(user_id))
+    user_data = user_ref.get().to_dict() or {}
+    completed_achievements = user_data.get('completed_achievements', {})
+
+    # Отримуємо всі досягнення
     achievements_ref = db.collection('achievements').stream()
     achievements = [(ach.id, ach.to_dict()) for ach in achievements_ref]
     
@@ -176,11 +184,23 @@ async def list_achievements(query):
         await query.message.reply_text("Немає доступних досягнень.")
         return
     
-    keyboard = [[InlineKeyboardButton(achievement['title'], callback_data=f'achievement_{achievement_id}')] for achievement_id, achievement in achievements]
+    # Формуємо клавіатуру з перевіркою виконаних досягнень
+    keyboard = []
+    for achievement_id, achievement in achievements:
+        title = achievement['title']
+        
+        # Додаємо прапорець для виконаних досягнень
+        if achievement_id in completed_achievements:
+            title += " ✅"
+        
+        keyboard.append([InlineKeyboardButton(title, callback_data=f'achievement_{achievement_id}')])
+
+    # Додаємо кнопку назад
     keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data='main_menu')])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.message.reply_text("Оберіть досягнення:", reply_markup=reply_markup)
+
 
 async def send_stats(query):
     users_ref = db.collection('users').stream()
