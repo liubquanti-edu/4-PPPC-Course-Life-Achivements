@@ -21,8 +21,17 @@ WAITING_FOR_COMPLETION_DESCRIPTION = 1
 
 # Start command handler
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    achievement_id = context.args[0] if context.args else None
+    user = update.effective_user
+    user_ref = db.collection('users').document(str(user.id))
     
+    # Зберігаємо ім'я користувача, якщо воно ще не збережено
+    if not user_ref.get().exists:
+        user_ref.set({
+            'username': user.full_name,
+            'completed_achievements': {}
+        }, merge=True)
+    
+    achievement_id = context.args[0] if context.args else None
     if achievement_id:
         achievement = db.collection('achievements').document(achievement_id).get()
         if achievement.exists:
@@ -39,15 +48,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Вітаю! Оберіть дію:", reply_markup=reply_markup)
 
 async def send_achievement_details(message, achievement, achievement_id):
+    # Підраховуємо кількість виконань для цього досягнення
+    users_ref = db.collection('users').stream()
+    completed_count = sum(1 for user in users_ref if achievement_id in user.to_dict().get('completed_achievements', {}))
+    
+    # Клавіатура для виконання досягнення
     keyboard = [
         [InlineKeyboardButton("📝 Виконати", callback_data=f'complete_{achievement_id}')],
         [InlineKeyboardButton("⬅️ Назад", callback_data='main_menu')],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
+    # Відправляємо деталі досягнення разом з кількістю виконань
     await message.reply_photo(
         photo=achievement['photo_url'],
-        caption=f"{achievement['title']}\n\n{achievement['description']}",
+        caption=f"{achievement['title']}\n\n{achievement['description']}\n\n"
+                f"Виконали {completed_count} користувачів",
         reply_markup=reply_markup
     )
 
@@ -75,6 +91,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await list_achievements(query)
     elif query.data == 'stats':
         await send_stats(query)
+    elif query.data == 'global_stats':
+        await send_global_stats(query)  # Обробка глобальної статистики
     elif query.data == 'new_random':
         await send_random_achievement(query, edit=True)
     elif query.data == 'main_menu':
@@ -88,7 +106,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         achievement_id = query.data.split('_')[1]
         context.user_data['achievement_id'] = achievement_id
         await query.message.reply_text("Опишіть, як ви виконали це досягнення:")
-        return WAITING_FOR_COMPLETION_DESCRIPTION  # Повертаємо стан
+        return WAITING_FOR_COMPLETION_DESCRIPTION
 
 async def save_completion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     achievement_id = context.user_data.get('achievement_id')
@@ -129,24 +147,33 @@ last_achievement_id = None
 
 async def send_random_achievement(query, edit=False):
     global last_achievement_id
-    achievements_ref = db.collection('achievements').stream()
-    achievements = [(ach.id, ach.to_dict()) for ach in achievements_ref]
+    user_id = query.from_user.id
+    user_ref = db.collection('users').document(str(user_id))
+    user_data = user_ref.get().to_dict() or {}
+    completed_achievements = user_data.get('completed_achievements', {})
 
-    # Перевірка наявності досягнень
+    # Отримуємо всі досягнення, окрім виконаних
+    achievements_ref = db.collection('achievements').stream()
+    achievements = [
+        (ach.id, ach.to_dict()) for ach in achievements_ref
+        if ach.id not in completed_achievements
+    ]
+
+    # Перевірка наявності невиконаних досягнень
     if not achievements:
-        await query.message.reply_text("Немає доступних досягнень.")
+        await query.message.reply_text("Усі досягнення вже виконано!")
         return
 
     # Пошук випадкового досягнення
     achievement_id, achievement = random.choice(achievements)
     
-    # Перевірка, щоб не повторювалося останнє досягнення
-    while achievement['photo_url'] == last_achievement_id and len(achievements) > 1:
+    # Уникнення повторів (тільки якщо є більше одного досягнення)
+    while achievement_id == last_achievement_id and len(achievements) > 1:
         achievement_id, achievement = random.choice(achievements)
 
-    last_achievement_id = achievement['photo_url']  # Зберігаємо останній photo_url
+    last_achievement_id = achievement_id  # Зберігаємо ID останнього досягнення
 
-    # Оновлена клавіатура з `achievement_id`
+    # Клавіатура для випадкового досягнення
     keyboard = [
         [InlineKeyboardButton("📝 Виконати", callback_data=f'complete_{achievement_id}')],
         [InlineKeyboardButton("🔄 Нове випадкове", callback_data='new_random')],
@@ -154,7 +181,7 @@ async def send_random_achievement(query, edit=False):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    # Відправка або редагування повідомлення з випадковим досягненням
+    # Відправка або редагування випадкового досягнення
     if edit:
         await query.message.edit_media(
             media=InputMediaPhoto(
@@ -203,15 +230,49 @@ async def list_achievements(query):
 
 
 async def send_stats(query):
-    users_ref = db.collection('users').stream()
-    completed_count = sum(1 for _ in users_ref)
-    
+    user_id = query.from_user.id
+    user_ref = db.collection('users').document(str(user_id))
+    user_data = user_ref.get().to_dict() or {}
+    completed_achievements = user_data.get('completed_achievements', {})
+
+    completed_count = len(completed_achievements)
+
     keyboard = [
+        [InlineKeyboardButton("📈 Глобальна статистика", callback_data='global_stats')],
         [InlineKeyboardButton("⬅️ Назад", callback_data='main_menu')],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.message.reply_text(
+        f"Ви виконали {completed_count} досягнень.",
+        reply_markup=reply_markup
+    )
+
+async def send_global_stats(query):
+    users_ref = db.collection('users').stream()
     
-    await query.message.reply_text(f"Ви виконали {completed_count} досягнень.", reply_markup=reply_markup)
+    # Отримуємо ім'я та кількість виконаних досягнень для кожного користувача
+    users_completed_count = []
+    for user in users_ref:
+        user_data = user.to_dict()
+        completed_achievements = user_data.get('completed_achievements', {})
+        username = user_data.get('username', 'Анонім')
+        users_completed_count.append((username, len(completed_achievements)))
+
+    # Сортуємо за кількістю виконаних досягнень у порядку спадання і беремо топ-10
+    top_users = sorted(users_completed_count, key=lambda x: x[1], reverse=True)[:10]
+    
+    # Формуємо повідомлення для відображення
+    global_stats_message = "🏆 Топ 10 користувачів за кількістю досягнень:\n"
+    for i, (username, count) in enumerate(top_users, start=1):
+        global_stats_message += f"{i}. {username}: {count} досягнень\n"
+
+    keyboard = [
+        [InlineKeyboardButton("⬅️ Назад", callback_data='stats')],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.message.reply_text(global_stats_message, reply_markup=reply_markup)
 
 if __name__ == "__main__":
     app.run_polling()
