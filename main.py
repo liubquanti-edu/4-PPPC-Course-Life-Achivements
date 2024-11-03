@@ -47,10 +47,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("Вітаю! Оберіть дію:", reply_markup=reply_markup)
 
-async def send_achievement_details(message, achievement, achievement_id):
+async def send_achievement_details(message, achievement, achievement_id, user_id):
     # Підраховуємо кількість виконань для цього досягнення
     users_ref = db.collection('users').stream()
     completed_count = sum(1 for user in users_ref if achievement_id in user.to_dict().get('completed_achievements', {}))
+    
+    # Перевіряємо, чи користувач виконав це досягнення
+    user_ref = db.collection('users').document(str(user_id))
+    user_data = user_ref.get().to_dict() or {}
+    completed_achievements = user_data.get('completed_achievements', {})
+    user_completion_text = completed_achievements.get(achievement_id, {}).get('description', None)
+    
+    # Формуємо текст досягнення
+    achievement_text = f"{achievement['title']}\n\n{achievement['description']}\n\n" \
+                       f"Виконали {completed_count} користувачів."
+    
+    if user_completion_text:
+        achievement_text += f"\n\n📝 Ваш опис виконання: {user_completion_text}"
     
     # Клавіатура для виконання досягнення
     keyboard = [
@@ -59,13 +72,13 @@ async def send_achievement_details(message, achievement, achievement_id):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    # Відправляємо деталі досягнення разом з кількістю виконань
+    # Відправляємо деталі досягнення разом з кількістю виконань і текстом виконання, якщо він є
     await message.reply_photo(
         photo=achievement['photo_url'],
-        caption=f"{achievement['title']}\n\n{achievement['description']}\n\n"
-                f"Виконали {completed_count} користувачів",
+        caption=achievement_text,
         reply_markup=reply_markup
     )
+
 
 async def send_random_achievement_details(message, achievement):
     keyboard = [
@@ -85,6 +98,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
+    user_id = query.from_user.id  # Отримуємо ID користувача
+    
     if query.data == 'random':
         await send_random_achievement(query)
     elif query.data == 'find':
@@ -92,7 +107,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == 'stats':
         await send_stats(query)
     elif query.data == 'global_stats':
-        await send_global_stats(query)  # Обробка глобальної статистики
+        await send_global_stats(query) 
     elif query.data == 'new_random':
         await send_random_achievement(query, edit=True)
     elif query.data == 'main_menu':
@@ -101,12 +116,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         achievement_id = query.data.split('_')[1]
         achievement = db.collection('achievements').document(achievement_id).get()
         if achievement.exists:
-            await send_achievement_details(query.message, achievement.to_dict(), achievement_id)
+            await send_achievement_details(query.message, achievement.to_dict(), achievement_id, user_id)  # Додаємо user_id
     elif query.data.startswith('complete_'):
         achievement_id = query.data.split('_')[1]
         context.user_data['achievement_id'] = achievement_id
         await query.message.reply_text("Опишіть, як ви виконали це досягнення:")
-        return WAITING_FOR_COMPLETION_DESCRIPTION
+        return WAITING_FOR_COMPLETION_DESCRIPTION  # Повертаємо стан
 
 async def save_completion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     achievement_id = context.user_data.get('achievement_id')
@@ -268,7 +283,7 @@ async def send_global_stats(query):
         global_stats_message += f"{i}. {username}: {count} досягнень\n"
 
     keyboard = [
-        [InlineKeyboardButton("⬅️ Назад", callback_data='stats')],
+        [InlineKeyboardButton("⬅️ Назад", callback_data='main_menu')],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
