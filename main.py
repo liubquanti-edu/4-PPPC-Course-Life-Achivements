@@ -245,23 +245,36 @@ async def list_achievements(query):
 
 
 async def send_stats(query):
-    user_id = query.from_user.id
-    user_ref = db.collection('users').document(str(user_id))
-    user_data = user_ref.get().to_dict() or {}
+    user_id = str(query.from_user.id)
+    user_ref = db.collection('users').document(user_id).get()
+    
+    # Отримуємо дані про виконані досягнення
+    user_data = user_ref.to_dict() if user_ref.exists else {}
     completed_achievements = user_data.get('completed_achievements', {})
 
+    # Формуємо текст для списку досягнень
     completed_count = len(completed_achievements)
+    achievements_list = "\n".join(
+        [f"• {db.collection('achievements').document(ach_id).get().to_dict().get('title', 'Невідоме досягнення')}"
+         for ach_id in completed_achievements]
+    )
+    
+    # Підготовка повідомлення для статистики
+    stats_text = f"Ви виконали {completed_count} досягнень.\n\n"
+    if achievements_list:
+        stats_text += f"Список виконаних досягнень:\n{achievements_list}"
+    else:
+        stats_text += "Ви ще не виконали жодного досягнення."
 
+    # Додаємо кнопку для повернення до головного меню
     keyboard = [
-        [InlineKeyboardButton("📈 Глобальна статистика", callback_data='global_stats')],
         [InlineKeyboardButton("⬅️ Назад", callback_data='main_menu')],
+        [InlineKeyboardButton("🌍 Глобальна статистика", callback_data='global_stats')],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await query.message.reply_text(
-        f"Ви виконали {completed_count} досягнень.",
-        reply_markup=reply_markup
-    )
+    await query.message.reply_text(stats_text, reply_markup=reply_markup)
+
 
 async def send_global_stats(query):
     users_ref = db.collection('users').stream()
