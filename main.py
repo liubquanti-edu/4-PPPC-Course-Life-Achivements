@@ -1,8 +1,5 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
-from telegram.ext import (
-    Application, CommandHandler, CallbackQueryHandler, MessageHandler,
-    ConversationHandler, ContextTypes, filters
-)
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, ConversationHandler, ContextTypes, filters
 import random
 import firebase_admin
 from firebase_admin import credentials, firestore
