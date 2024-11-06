@@ -135,6 +135,51 @@ conv_handler = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel)],
 )
 
+async def change_username(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    user_id = user.id
+    new_username = ' '.join(context.args)  # Отримуємо новий нікнейм із аргументів команди
+
+    # Перевірка, чи вказано нове ім'я
+    if not new_username:
+        await update.message.reply_text("Будь ласка, вкажіть новий нікнейм після команди, наприклад: \n/username Нікнейм")
+        return
+
+    # Оновлення нікнейму в базі даних
+    user_ref = db.collection('users').document(str(user_id))
+    user_ref.update({
+        'username': new_username
+    })
+
+    await update.message.reply_text(f"Ваш нікнейм було успішно змінено на: {new_username}")
+
+async def toggle_privacy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    user_id = user.id
+    
+    # Отримуємо поточний статус приватності користувача з бази даних
+    user_ref = db.collection('users').document(str(user_id))
+    user_data = user_ref.get().to_dict() or {}
+    is_private = user_data.get('privacy', False)  # Якщо користувач не має цього поля, за замовчуванням його статус публічний
+
+    # Перемикаємо статус на протилежний
+    new_privacy_status = not is_private
+
+    # Оновлюємо статус у Firebase
+    user_ref.update({
+        'privacy': new_privacy_status
+    })
+
+    # Відправляємо повідомлення користувачу про зміну статусу
+    if new_privacy_status:
+        await update.message.reply_text("🔒  •  Ваш статус було змінено на <b>приватний</b>. Ви більше не будете показуватись у глобальній статистиці.", parse_mode='HTML')
+    else:
+        await update.message.reply_text("🔓  •  Ваш статус було змінено на <b>публічний</b>. Ви знову будете показуватись у глобальній статистиці.", parse_mode='HTML')
+
+privacy_handler = CommandHandler("privacy", toggle_privacy)
+app.add_handler(privacy_handler)
+username_handler = CommandHandler("username", change_username)
+app.add_handler(username_handler)
 app.add_handler(conv_handler)
 app.add_handler(CallbackQueryHandler(button_handler))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, save_completion))
@@ -257,6 +302,11 @@ async def send_global_stats(query):
     users_completed_count = []
     for user in users_ref:
         user_data = user.to_dict()
+        
+        # Перевіряємо статус приватності
+        if user_data.get('privacy', False):  # Якщо користувач приватний, пропускаємо його
+            continue
+        
         completed_achievements = user_data.get('completed_achievements', {})
         username = user_data.get('username', 'Анонім')
         users_completed_count.append((username, len(completed_achievements)))
