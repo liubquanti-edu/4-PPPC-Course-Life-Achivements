@@ -46,14 +46,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def suggest_achievement(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    suggestion_text = ' '.join(context.args)  # Отримуємо текст пропозиції
+    suggestion_text = ' '.join(context.args)
 
-    # Перевірка, чи було вказано опис досягнення
     if not suggestion_text:
         await update.message.reply_text("📬  •  Щоб запропонувати досягнення, вкажіть опис після команди, наприклад:\n\n/suggest Моя пропозиція для досягнення")
         return
 
-    # Відправляємо пропозицію адміністратору
     await context.bot.send_message(
         chat_id=ADMIN_ID,
         text=f"📢  •  Нова пропозиція від <a href='tg://user?id={user.id}'>{user.full_name}</a>.\n\n⭐  •  {suggestion_text}",
@@ -123,23 +121,20 @@ async def rfriend(update: Update, context: ContextTypes.DEFAULT_TYPE):
     friend_ref = db.collection('users').document(friend_id)
     user_ref = db.collection('users').document(str(user_id))
 
-    # Перевірка, чи існує друг
     if not friend_ref.get().exists:
         await update.message.reply_text("❌ • Користувача з таким ID не знайдено.")
         return
 
-    # Отримуємо список друзів поточного користувача
     user_data = user_ref.get().to_dict()
     if 'friends' not in user_data or friend_id not in user_data['friends']:
         await update.message.reply_text("❌ • Користувач не є вашим другом.")
         return
 
-    # Видаляємо друга з обох списків
     user_ref.update({
-        'friends': firestore.ArrayRemove([friend_id])  # Видаляємо друга зі списку друзів поточного користувача
+        'friends': firestore.ArrayRemove([friend_id])
     })
     friend_ref.update({
-        'friends': firestore.ArrayRemove([str(user_id)])  # Видаляємо поточного користувача зі списку друзів іншого користувача
+        'friends': firestore.ArrayRemove([str(user_id)])
     })
 
     await update.message.reply_text(f"❌ • Друга видалено.")
@@ -179,21 +174,17 @@ async def friend_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     friend_ref = db.collection('users').document(friend_id)
     user_ref = db.collection('users').document(str(user.id))
 
-    # Перевірка, чи існує друг
     if not friend_ref.get().exists:
         await update.message.reply_text("❌ • Користувача з таким ID не знайдено.")
         return
 
-    # Отримуємо список друзів поточного користувача
     user_data = user_ref.get().to_dict()
     friends = user_data.get('friends', [])
     
-    # Перевірка, чи друг вже є у списку
     if friend_id in friends:
         await update.message.reply_text("❌ • Ви вже є друзями з цим користувачем.")
         return
 
-    # Відправляємо запит на підтвердження дружби
     await context.bot.send_message(
         chat_id=friend_id,
         text=f"👥 • <a href='tg://user?id={user.id}'>{user.full_name}</a> хоче додати вас у друзі.",
@@ -283,15 +274,12 @@ async def save_completion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_ref.set({'completed_achievements': completed_achievements}, merge=True)
 
     await update.message.reply_text("✅  •  Виконання збережено!")
-    # Відкриваємо деталі досягнення після збереження виконання
     achievement = db.collection('achievements').document(achievement_id).get()
     if achievement.exists:
         await send_achievement_details(update.message, achievement.to_dict(), achievement_id, user_id)
-    # Отримуємо список друзів користувача
     user_data = user_ref.get().to_dict() or {}
     friends = user_data.get('friends', [])
 
-    # Відправляємо повідомлення всім друзям
     for friend_id in friends:
         friend_ref = db.collection('users').document(friend_id)
         friend_data = friend_ref.get().to_dict() or {}
@@ -319,14 +307,12 @@ conv_handler = ConversationHandler(
 async def change_username(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
-    new_username = ' '.join(context.args)  # Отримуємо новий нікнейм із аргументів команди
+    new_username = ' '.join(context.args)
 
-    # Перевірка, чи вказано нове ім'я
     if not new_username:
         await update.message.reply_text("⚙️  •  Будь ласка, вкажіть новий нікнейм після команди, наприклад:\n\n/username Нікнейм")
         return
 
-    # Оновлення нікнейму в базі даних
     user_ref = db.collection('users').document(str(user_id))
     user_ref.update({
         'username': new_username
@@ -338,20 +324,16 @@ async def toggle_privacy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
     
-    # Отримуємо поточний статус приватності користувача з бази даних
     user_ref = db.collection('users').document(str(user_id))
     user_data = user_ref.get().to_dict() or {}
-    is_private = user_data.get('privacy', False)  # Якщо користувач не має цього поля, за замовчуванням його статус публічний
+    is_private = user_data.get('privacy', False)
 
-    # Перемикаємо статус на протилежний
     new_privacy_status = not is_private
 
-    # Оновлюємо статус у Firebase
     user_ref.update({
         'privacy': new_privacy_status
     })
 
-    # Відправляємо повідомлення користувачу про зміну статусу
     if new_privacy_status:
         msg = await update.message.reply_text("🔒  •  Ваш статус було змінено на <b>приватний</b>. Ви більше не будете показуватись у глобальній статистиці.", parse_mode='HTML')
         await asyncio.sleep(3)
@@ -499,7 +481,6 @@ async def send_stats(query):
     await query.message.reply_text(stats_text, reply_markup=reply_markup)
 
 async def send_friend_stats(query, friend_id):
-    # Отримуємо дані друга
     friend_ref = db.collection('users').document(friend_id).get()
     if not friend_ref.exists:
         await query.message.reply_text("❌  •  Користувача не знайдено.")
@@ -532,8 +513,7 @@ async def send_global_stats(query):
     for user in users_ref:
         user_data = user.to_dict()
         
-        # Перевіряємо статус приватності
-        if user_data.get('privacy', False):  # Якщо користувач приватний, пропускаємо його
+        if user_data.get('privacy', False):
             continue
         
         completed_achievements = user_data.get('completed_achievements', {})
