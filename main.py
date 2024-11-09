@@ -208,8 +208,10 @@ async def handle_friend_request(query, action):
         user_ref.update({'friends': firestore.ArrayUnion([friend_id])})
         friend_ref.update({'friends': firestore.ArrayUnion([str(user_id)])})
         await query.message.reply_text("✅  •  Ви тепер друзі!")
+        await query.message.delete()
     else:
         await query.message.reply_text("❌  •  Запит відхилено.")
+        await query.message.delete()
 
 async def friend_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
