@@ -37,7 +37,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📊 Статистика", callback_data='stats')],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("👋  •  Вітаємо у White Life!\n\n✅  •  Тут ви зможете виконувати різноманітні життєві досягнення та ділитися цим з друзями.\n\n🔽  •  Оберіть дію:", reply_markup=reply_markup)
+    await update.message.reply_text("👋  •  Вітаємо у White Life!\n\n✅  •  Тут ви зможете виконувати різноманітні життєві досягнення та ділитися цим з друзями.\n\n⚙️  •  Функції налаштувать доступні в меню /command.\n\n🔽  •  Оберіть дію:", reply_markup=reply_markup)
 
 async def send_achievement_details(message, achievement, achievement_id, user_id):
     users_ref = db.collection('users').stream()
@@ -48,24 +48,32 @@ async def send_achievement_details(message, achievement, achievement_id, user_id
     completed_achievements = user_data.get('completed_achievements', {})
     user_completion_text = completed_achievements.get(achievement_id, {}).get('description', None)
     
-    achievement_text = f"{achievement['title']}\n\n{achievement['description']}\n\n" \
-                       f"Виконали {completed_count} користувачів."
+    achievement_text = f"<b>⭐  •  {achievement['title']}</b>\n🌐  •  Вже виконали: {completed_count}\n\n<blockquote>{achievement['description']}</blockquote>"
     
     if user_completion_text:
-        achievement_text += f"\n\n📝 Ваш опис виконання: {user_completion_text}"
+        achievement_text += f"\n\n📝  •  Ваш опис виконання:\n\n<blockquote>{user_completion_text}</blockquote>"
     
-    keyboard = [
-        [InlineKeyboardButton("📝 Виконати", callback_data=f'complete_{achievement_id}')],
-        [InlineKeyboardButton("⬅️ Назад", callback_data='main_menu')],
-    ]
+    if user_completion_text:
+        keyboard = [
+            [InlineKeyboardButton("📝 Редагувати виконання", callback_data=f'complete_{achievement_id}')],
+            [InlineKeyboardButton("⬅️ Назад", callback_data='main_menu')],
+        ]
+    else:
+        keyboard = [
+            [InlineKeyboardButton("📝 Виконати", callback_data=f'complete_{achievement_id}')],
+            [InlineKeyboardButton("⬅️ Назад", callback_data='main_menu')],
+        ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await message.reply_photo(
         photo=achievement['photo_url'],
         caption=achievement_text,
-        reply_markup=reply_markup
+        reply_markup=reply_markup,
+        parse_mode='HTML'
     )
 
+async def command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("⚙️  •  Меню команд знаходиться ліворуч від поля для ведення повідомлення.")
 
 async def send_random_achievement_details(message, achievement):
     keyboard = [
@@ -106,7 +114,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data.startswith('complete_'):
         achievement_id = query.data.split('_')[1]
         context.user_data['achievement_id'] = achievement_id
-        await query.message.reply_text("Опишіть, як ви виконали це досягнення:")
+        await query.message.reply_text("💬  •  Опишіть, як ви виконали це досягнення:")
         return WAITING_FOR_COMPLETION_DESCRIPTION
 
 async def save_completion(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -120,7 +128,7 @@ async def save_completion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     completed_achievements[achievement_id] = {'description': description}
     user_ref.set({'completed_achievements': completed_achievements}, merge=True)
 
-    await update.message.reply_text("Виконання збережено! ✅")
+    await update.message.reply_text("✅  •  Виконання збережено!")
     return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -142,7 +150,7 @@ async def change_username(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Перевірка, чи вказано нове ім'я
     if not new_username:
-        await update.message.reply_text("Будь ласка, вкажіть новий нікнейм після команди, наприклад: \n/username Нікнейм")
+        await update.message.reply_text("⚙️  •  Будь ласка, вкажіть новий нікнейм після команди, наприклад: \n/username Нікнейм")
         return
 
     # Оновлення нікнейму в базі даних
@@ -151,7 +159,7 @@ async def change_username(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'username': new_username
     })
 
-    await update.message.reply_text(f"Ваш нікнейм було успішно змінено на: {new_username}")
+    await update.message.reply_text(f"⚙️  •  Ваш нікнейм було успішно змінено на: {new_username}")
 
 async def toggle_privacy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -178,6 +186,8 @@ async def toggle_privacy(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 privacy_handler = CommandHandler("privacy", toggle_privacy)
 app.add_handler(privacy_handler)
+command_handler = CommandHandler("command", command)
+app.add_handler(command_handler)
 username_handler = CommandHandler("username", change_username)
 app.add_handler(username_handler)
 app.add_handler(conv_handler)
@@ -200,7 +210,7 @@ async def send_random_achievement(query, edit=False):
     ]
 
     if not achievements:
-        await query.message.reply_text("Усі досягнення вже виконано!")
+        await query.message.reply_text("⭐  •  Усі досягнення вже виконано!")
         return
 
     achievement_id, achievement = random.choice(achievements)
@@ -258,14 +268,16 @@ async def list_achievements(query):
         title = achievement['title']
         
         if achievement_id in completed_achievements:
-            title += " ✅"
+            title = "✅ " + title
+        else:
+            title = "❌ " + title
         
         keyboard.append([InlineKeyboardButton(title, callback_data=f'achievement_{achievement_id}')])
 
     keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data='main_menu')])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.message.reply_text("Оберіть досягнення:", reply_markup=reply_markup)
+    await query.message.reply_text("⭐  •  Оберіть досягнення:", reply_markup=reply_markup)
 
 
 async def send_stats(query):
@@ -277,13 +289,13 @@ async def send_stats(query):
 
     completed_count = len(completed_achievements)
     achievements_list = "\n".join(
-        [f"• {db.collection('achievements').document(ach_id).get().to_dict().get('title', 'Невідоме досягнення')}"
+        [f"⭐  •  {db.collection('achievements').document(ach_id).get().to_dict().get('title', 'Невідоме досягнення')}"
          for ach_id in completed_achievements]
     )
     
-    stats_text = f"Ви виконали {completed_count} досягнень.\n\n"
+    stats_text = f"📊  •  Статистика.\n\n✅  •  Виконаних досягнень: {completed_count}\n\n"
     if achievements_list:
-        stats_text += f"Список виконаних досягнень:\n{achievements_list}"
+        stats_text += f"📃  •  Список виконаних досягнень:\n{achievements_list}"
     else:
         stats_text += "Ви ще не виконали жодного досягнення."
 
