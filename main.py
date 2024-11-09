@@ -168,24 +168,38 @@ async def friend_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     friend_id = ' '.join(context.args)
 
     if not friend_id:
-        await update.message.reply_text("⚙️  •  Будь ласка, вкажіть ID користувача після команди, наприклад: \n/friend 123456789")
+        await update.message.reply_text("⚙️ • Будь ласка, вкажіть ID користувача після команди, наприклад: \n/friend 123456789")
         return
 
     friend_ref = db.collection('users').document(friend_id)
+    user_ref = db.collection('users').document(str(user.id))
+
+    # Перевірка, чи існує друг
     if not friend_ref.get().exists:
-        await update.message.reply_text("❌  •  Користувача з таким ID не знайдено.")
+        await update.message.reply_text("❌ • Користувача з таким ID не знайдено.")
         return
 
+    # Отримуємо список друзів поточного користувача
+    user_data = user_ref.get().to_dict()
+    friends = user_data.get('friends', [])
+    
+    # Перевірка, чи друг вже є у списку
+    if friend_id in friends:
+        await update.message.reply_text("❌ • Ви вже є друзями з цим користувачем.")
+        return
+
+    # Відправляємо запит на підтвердження дружби
     await context.bot.send_message(
         chat_id=friend_id,
-        text=f"👥  •  <a href='tg://user?id={user.id}'>{user.full_name}</a> (ID: <code>{user.id}</code>) хоче додати вас у друзі. Підтвердити?",
+        text=f"👥 • <a href='tg://user?id={user.id}'>{user.full_name}</a> (ID: <code>{user.id}</code>) хоче додати вас у друзі. Підтвердити?",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Підтвердити", callback_data=f'confirm_friend_{user.id}')],
             [InlineKeyboardButton("❌ Відхилити", callback_data=f'reject_friend_{user.id}')],
         ]),
         parse_mode='HTML'
     )
-    await update.message.reply_text("✅  •  Запит на додавання у друзі надіслано.")
+    await update.message.reply_text("✅ • Запит на додавання у друзі надіслано.")
+
 
 async def handle_friend_request(query, action):
     user_id = query.from_user.id
@@ -253,7 +267,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def save_completion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     achievement_id = context.user_data.get('achievement_id')
-    user_id = update.effective_user.id
+    user = update.effective_user
+    user_id = user.id
     description = update.message.text
 
     user_ref = db.collection('users').document(str(user_id))
@@ -263,6 +278,21 @@ async def save_completion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_ref.set({'completed_achievements': completed_achievements}, merge=True)
 
     await update.message.reply_text("✅  •  Виконання збережено!")
+    # Отримуємо список друзів користувача
+    user_data = user_ref.get().to_dict() or {}
+    friends = user_data.get('friends', [])
+
+    # Відправляємо повідомлення всім друзям
+    for friend_id in friends:
+        friend_ref = db.collection('users').document(friend_id)
+        friend_data = friend_ref.get().to_dict() or {}
+        friend_username = friend_data.get('username', 'Друг')
+
+        await context.bot.send_message(
+            chat_id=friend_id,
+            text=f"👥  •  Ваш друг {user.full_name} (ID: {user.id}) виконав досягнення: {db.collection('achievements').document(achievement_id).get().to_dict().get('title', 'Невідоме досягнення')}.\n\n📝  •  Опис виконання:\n\n<blockquote>{description}</blockquote>",
+            parse_mode='HTML'
+        )
     return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
