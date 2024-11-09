@@ -3,7 +3,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 import random
 import firebase_admin
 from firebase_admin import credentials, firestore
-from config import TOKEN, FIREBASE
+from config import TOKEN, FIREBASE, ADMIN_ID
 
 cred = credentials.Certificate(FIREBASE)
 firebase_admin.initialize_app(cred)
@@ -38,6 +38,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("👋  •  Вітаємо у White Life!\n\n✅  •  Тут ви зможете виконувати різноманітні життєві досягнення та ділитися цим з друзями.\n\n⚙️  •  Функції налаштувать доступні в меню /command.\n\n🔽  •  Оберіть дію:", reply_markup=reply_markup)
+
+async def suggest_achievement(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    suggestion_text = ' '.join(context.args)  # Отримуємо текст пропозиції
+
+    # Перевірка, чи було вказано опис досягнення
+    if not suggestion_text:
+        await update.message.reply_text("📬  •  Щоб запропонувати досягнення, вкажіть опис після команди, наприклад: \n/suggest Моя пропозиція для досягнення")
+        return
+
+    # Відправляємо пропозицію адміністратору
+    await context.bot.send_message(
+        chat_id=ADMIN_ID,
+        text=f"📢  •  Нова пропозиція від {user.full_name} (ID: {user.id}).\n\n⭐  •  {suggestion_text}"
+    )
+    
+    await update.message.reply_text("✅  •  Вашу пропозицію було надіслано адміністратору.")
 
 async def send_achievement_details(message, achievement, achievement_id, user_id):
     users_ref = db.collection('users').stream()
@@ -186,6 +203,8 @@ async def toggle_privacy(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 privacy_handler = CommandHandler("privacy", toggle_privacy)
 app.add_handler(privacy_handler)
+suggest_handler = CommandHandler("suggest", suggest_achievement)
+app.add_handler(suggest_handler)
 command_handler = CommandHandler("command", command)
 app.add_handler(command_handler)
 username_handler = CommandHandler("username", change_username)
