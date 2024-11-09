@@ -12,6 +12,7 @@ db = firestore.client()
 app = Application.builder().token(TOKEN).build()
 
 WAITING_FOR_COMPLETION_DESCRIPTION = 1
+WAITING_FOR_FRIEND_CONFIRMATION = 2
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -35,9 +36,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🎲 Випадкове досягнення", callback_data='random')],
         [InlineKeyboardButton("🔍 Знайти досягнення", callback_data='find')],
         [InlineKeyboardButton("📊 Статистика", callback_data='stats')],
+        [InlineKeyboardButton("👥 Друзі", callback_data='friends')],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("👋  •  Вітаємо у White Life!\n\n✅  •  Тут ви зможете виконувати різноманітні життєві досягнення та ділитися цим з друзями.\n\n⚙️  •  Функції налаштувать доступні в меню /command.\n\n🔽  •  Оберіть дію:", reply_markup=reply_markup)
+    user_data = user_ref.get().to_dict()
+    username = user_data.get('username', 'Користувач')
+    await update.message.reply_text(f"👋  •  Вітаємо у White Life, {username}!\n\n✅  •  Тут ви зможете виконувати різноманітні життєві досягнення та ділитися цим з друзями.\n\n⚙️  •  Функції налаштувать та друзів доступні в меню /command.\n\n🔽  •  Оберіть дію:", reply_markup=reply_markup)
 
 async def suggest_achievement(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -105,6 +109,117 @@ async def send_random_achievement_details(message, achievement):
         reply_markup=reply_markup
     )
 
+async def rfriend(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    user_id = user.id
+    friend_id = ' '.join(context.args)
+
+    if not friend_id:
+        await update.message.reply_text("⚙️ • Будь ласка, вкажіть ID користувача після команди, наприклад: \n/rfriend 123456789")
+        return
+
+    friend_ref = db.collection('users').document(friend_id)
+    user_ref = db.collection('users').document(str(user_id))
+
+    # Перевірка, чи існує друг
+    if not friend_ref.get().exists:
+        await update.message.reply_text("❌ • Користувача з таким ID не знайдено.")
+        return
+
+    # Отримуємо список друзів поточного користувача
+    user_data = user_ref.get().to_dict()
+    if 'friends' not in user_data or friend_id not in user_data['friends']:
+        await update.message.reply_text("❌ • Користувач не є вашим другом.")
+        return
+
+    # Видаляємо друга з обох списків
+    user_ref.update({
+        'friends': firestore.ArrayRemove([friend_id])  # Видаляємо друга зі списку друзів поточного користувача
+    })
+    friend_ref.update({
+        'friends': firestore.ArrayRemove([str(user_id)])  # Видаляємо поточного користувача зі списку друзів іншого користувача
+    })
+
+    await update.message.reply_text(f"❌ • Ви більше не є друзями з {friend_id}.")
+
+
+
+async def list_friends(query):
+    user_id = query.from_user.id
+    user_ref = db.collection('users').document(str(user_id))
+    user_data = user_ref.get().to_dict() or {}
+    friends = user_data.get('friends', [])
+
+    if not friends:
+        await query.message.reply_text(f"У вас немає друзів. Ваш ID: <code>{user_id}</code>\nСкопіюйте цей ID та надішліть його другу, щоб додати вас у друзі.", parse_mode='HTML')
+        return
+
+    keyboard = [
+        [InlineKeyboardButton(db.collection('users').document(friend_id).get().to_dict().get('username', 'Невідомий користувач'), callback_data=f'friend_{friend_id}') for friend_id in friends]
+    ]
+    keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data='main_menu')])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    user_id = query.from_user.id
+    await query.message.reply_text(f"👥  •  Ваші друзі (Ваш ID: <code>{user_id}</code>):", reply_markup=reply_markup, parse_mode='HTML')
+
+async def friend_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    friend_id = ' '.join(context.args)
+
+    if not friend_id:
+        await update.message.reply_text("⚙️  •  Будь ласка, вкажіть ID користувача після команди, наприклад: \n/friend 123456789")
+        return
+
+    friend_ref = db.collection('users').document(friend_id)
+    if not friend_ref.get().exists:
+        await update.message.reply_text("❌  •  Користувача з таким ID не знайдено.")
+        return
+
+    await context.bot.send_message(
+        chat_id=friend_id,
+        text=f"👥  •  <a href='tg://user?id={user.id}'>{user.full_name}</a> (ID: <code>{user.id}</code>) хоче додати вас у друзі. Підтвердити?",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Підтвердити", callback_data=f'confirm_friend_{user.id}')],
+            [InlineKeyboardButton("❌ Відхилити", callback_data=f'reject_friend_{user.id}')],
+        ]),
+        parse_mode='HTML'
+    )
+    await update.message.reply_text("✅  •  Запит на додавання у друзі надіслано.")
+
+async def handle_friend_request(query, action):
+    user_id = query.from_user.id
+    friend_id = query.data.split('_')[2]
+
+    user_ref = db.collection('users').document(str(user_id))
+    friend_ref = db.collection('users').document(str(friend_id))
+
+    if action == 'confirm':
+        user_ref.update({'friends': firestore.ArrayUnion([friend_id])})
+        friend_ref.update({'friends': firestore.ArrayUnion([str(user_id)])})
+        await query.message.reply_text("✅  •  Ви тепер друзі!")
+    else:
+        await query.message.reply_text("❌  •  Запит на додавання у друзі відхилено.")
+
+async def friend_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if query.data.startswith('friend_'):
+        friend_id = query.data.split('_')[1]
+        friend_ref = db.collection('users').document(friend_id).get()
+        if friend_ref.exists:
+            await send_friend_stats(query, friend_id)
+    elif query.data.startswith('confirm_friend_'):
+        await handle_friend_request(query, 'confirm')
+    elif query.data.startswith('reject_friend_'):
+        await handle_friend_request(query, 'reject')
+
+app.add_handler(CommandHandler("friend", friend_request))
+app.add_handler(CallbackQueryHandler(friend_button_handler, pattern='friend_'))
+app.add_handler(CallbackQueryHandler(friend_button_handler, pattern='confirm_friend_'))
+app.add_handler(CallbackQueryHandler(friend_button_handler, pattern='reject_friend_'))
+
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -117,6 +232,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await list_achievements(query)
     elif query.data == 'stats':
         await send_stats(query)
+    elif query.data == 'friends':
+        await list_friends(query)
     elif query.data == 'global_stats':
         await send_global_stats(query) 
     elif query.data == 'new_random':
@@ -201,6 +318,8 @@ async def toggle_privacy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("🔓  •  Ваш статус було змінено на <b>публічний</b>. Ви знову будете показуватись у глобальній статистиці.", parse_mode='HTML')
 
+rfriend_handler = CommandHandler("rfriend", rfriend)
+app.add_handler(rfriend_handler)
 privacy_handler = CommandHandler("privacy", toggle_privacy)
 app.add_handler(privacy_handler)
 suggest_handler = CommandHandler("suggest", suggest_achievement)
@@ -326,6 +445,28 @@ async def send_stats(query):
 
     await query.message.reply_text(stats_text, reply_markup=reply_markup)
 
+async def send_friend_stats(query, friend_id):
+    # Отримуємо дані друга
+    friend_ref = db.collection('users').document(friend_id).get()
+    if not friend_ref.exists:
+        await query.message.reply_text("❌  •  Користувача не знайдено.")
+        return
+
+    friend_data = friend_ref.to_dict()
+    completed_achievements = friend_data.get('completed_achievements', {})
+    completed_count = len(completed_achievements)
+    achievements_list = "\n".join(
+        [f"⭐  •  {db.collection('achievements').document(ach_id).get().to_dict().get('title', 'Невідоме досягнення')}"
+         for ach_id in completed_achievements]
+    )
+    
+    stats_text = f"📊  •  Статистика друга.\n\n✅  •  Виконаних досягнень: {completed_count}\n\n"
+    if achievements_list:
+        stats_text += f"📃  •  Список виконаних досягнень:\n{achievements_list}"
+    else:
+        stats_text += "⭐  •  Друг ще не виконав жодного досягнення."
+    
+    await query.message.reply_text(stats_text)
 
 async def send_global_stats(query):
     users_ref = db.collection('users').stream()
